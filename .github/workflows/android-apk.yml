@@ -169,7 +169,9 @@ jobs:
           done
 
       - name: Configure Android NDK
-        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
       - name: Prepare experimental tree-friendly spawn biome
         if: github.ref_name == 'experiment/tree-generation'
@@ -225,6 +227,9 @@ jobs:
               p.write_text("\n".join(lines) + "\n")
           PY
           sed -i 's/^package = /package_name = /' Cargo.toml
+          if [ "${GITHUB_REF_NAME}" = "experiment/tree-generation" ]; then
+            sed -i 's/^package_name = .*/package_name = "com.pocovoxelsandbox.game.v2"/' Cargo.toml
+          fi
           echo '--- Normalized Android metadata ---'
           sed -n '24,40p' Cargo.toml
 
@@ -253,7 +258,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.ref_name == 'experiment/tree-generation' && 'poco-voxel-sandbox-tree-experiment-arm64-apk' || 'poco-voxel-sandbox-arm64-apk' }}
+          name: ${{ github.ref_name == 'experiment/tree-generation' && 'poco-voxel-sandbox-v2-tree-fix-arm64-apk' || 'poco-voxel-sandbox-arm64-apk' }}
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
           retention-days: 14
