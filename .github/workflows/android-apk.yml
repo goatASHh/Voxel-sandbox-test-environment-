@@ -182,8 +182,12 @@ jobs:
           test -x "$TOOLCHAIN_BIN/ld.lld"
           test -x "$TOOLCHAIN_BIN/aarch64-linux-android29-clang"
           ln -sf llvm-ar "$TOOLCHAIN_BIN/aarch64-linux-android-ar"
+          # cargo-quad-apk expects this legacy linker filename. Point it at
+          # the NDK Clang driver so target/sysroot runtime libraries are set up.
+          ln -sf aarch64-linux-android29-clang "$TOOLCHAIN_BIN/aarch64-linux-android-ld"
+          test -x "$TOOLCHAIN_BIN/aarch64-linux-android-ld"
           echo "Android NDK tools verified:"
-          ls -l "$TOOLCHAIN_BIN/llvm-ar" "$TOOLCHAIN_BIN/ld.lld" "$TOOLCHAIN_BIN/aarch64-linux-android29-clang"
+          ls -l "$TOOLCHAIN_BIN/llvm-ar" "$TOOLCHAIN_BIN/aarch64-linux-android29-clang" "$TOOLCHAIN_BIN/aarch64-linux-android-ld"
 
       - name: Prepare experimental tree-friendly spawn biome
         if: github.ref_name == 'experiment/tree-generation'
