@@ -9,6 +9,7 @@ on:
       - 'Cargo.lock'
       - 'src/**'
       - 'assets/**'
+      - 'Poco_Voxel_Sandbox_Dev10_Dev11_working_source*.zip'
 
 permissions:
   contents: read
@@ -24,6 +25,21 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
+      - name: Unpack uploaded game source ZIP
+        shell: bash
+        run: |
+          ARCHIVE="$(find . -maxdepth 1 -type f -iname 'Poco_Voxel_Sandbox_Dev10_Dev11_working_source*.zip' | head -n 1)"
+          if [ -n "$ARCHIVE" ]; then
+            mkdir -p /tmp/poco-source
+            unzip -q "$ARCHIVE" -d /tmp/poco-source
+            PROJECT_DIR="$(find /tmp/poco-source -mindepth 1 -maxdepth 2 -type f -name Cargo.toml -printf '%h\\n' | head -n 1)"
+            if [ -z "$PROJECT_DIR" ]; then
+              echo "::error::The uploaded ZIP does not contain a Cargo.toml project."
+              exit 1
+            fi
+            rsync -a --exclude='.github' "$PROJECT_DIR/" ./
+          fi
 
       - name: Verify Rust project is at repository root
         run: |
