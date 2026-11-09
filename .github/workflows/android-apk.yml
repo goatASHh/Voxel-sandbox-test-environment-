@@ -45,6 +45,22 @@ jobs:
           fi
           test -f Cargo.toml && test -d src
 
+      - name: Prepare experimental tree-friendly spawn biome
+        if: github.ref_name == 'experiment/tree-generation'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src/terrain.rs")
+          s = p.read_text()
+          old = "else if moisture < -0.38 && climate > -0.05 { Biome::Desert }"
+          new = "else if moisture < -0.38 && climate > 0.30 { Biome::Desert }"
+          if old not in s:
+              raise SystemExit("Expected biome rule was not found; refusing to alter unknown terrain code.")
+          p.write_text(s.replace(old, new, 1))
+          print("Experimental spawn biome adjusted: starting region is no longer forced into desert.")
+          PY
+
       - name: Apply Macroquad API and Rust type fixes
         shell: bash
         run: |
@@ -176,9 +192,22 @@ jobs:
           PY
           grep -nE 'near:|far:|draw_line\(cx|let radius|Vertex \{ position' src/main.rs src/terrain.rs src/renderer.rs
 
-      - name: Normalize cargo-quad-apk package metadata
+      - name: Remove unsupported nested Android application metadata
         shell: bash
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("Cargo.toml")
+          lines = p.read_text().splitlines()
+          try:
+              start = lines.index("[package.metadata.android.application]")
+          except ValueError:
+              start = None
+          if start is not None:
+              end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("[")), len(lines))
+              del lines[start:end]
+              p.write_text("\\n".join(lines) + "\\n")
+          PY
           sed -i 's/^package = /package_name = /' Cargo.toml
           echo '--- Normalized Android metadata ---'
           sed -n '24,40p' Cargo.toml
