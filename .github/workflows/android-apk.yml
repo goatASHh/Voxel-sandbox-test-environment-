@@ -20,6 +20,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  rust-tests:
+    name: Full Rust test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Unpack uploaded game source ZIP
+        shell: bash
+        run: |
+          ARCHIVE="$(find . -maxdepth 1 -type f -iname 'Poco_Voxel_Sandbox_Dev10_Dev11_working_source*.zip' | head -n 1)"
+          if [ -n "$ARCHIVE" ]; then
+            mkdir -p /tmp/poco-source
+            unzip -q "$ARCHIVE" -d /tmp/poco-source
+            CARGO_FILE="$(find /tmp/poco-source -mindepth 1 -maxdepth 3 -type f -name Cargo.toml -print -quit)"
+            if [ -z "$CARGO_FILE" ]; then
+              echo "::error::The uploaded ZIP does not contain a Cargo.toml project."
+              exit 1
+            fi
+            PROJECT_DIR="$(dirname "$CARGO_FILE")"
+            rsync -a --exclude='.github' "$PROJECT_DIR/" ./
+          fi
+          test -f Cargo.toml && test -d src
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build files
+        uses: Swatinem/rust-cache@v2
+
+      - name: Generate dependency lockfile
+        run: cargo generate-lockfile
+
+      - name: Run complete Rust unit test suite
+        run: cargo test --locked
+
   android-arm64:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -113,9 +150,6 @@ jobs:
 
       - name: Generate dependency lockfile
         run: cargo generate-lockfile
-
-      - name: Run Rust unit tests
-        run: cargo test --locked
 
       - name: Install cargo-quad-apk
         run: cargo install cargo-quad-apk --locked
