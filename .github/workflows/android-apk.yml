@@ -180,12 +180,10 @@ jobs:
           TOOLCHAIN_BIN="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin"
           test -x "$TOOLCHAIN_BIN/llvm-ar"
           test -x "$TOOLCHAIN_BIN/ld.lld"
+          test -x "$TOOLCHAIN_BIN/aarch64-linux-android29-clang"
           ln -sf llvm-ar "$TOOLCHAIN_BIN/aarch64-linux-android-ar"
-          ln -sf ld.lld "$TOOLCHAIN_BIN/aarch64-linux-android-ld"
-          test -x "$TOOLCHAIN_BIN/aarch64-linux-android-ar"
-          test -x "$TOOLCHAIN_BIN/aarch64-linux-android-ld"
-          echo "Android NDK compatibility tools verified:"
-          ls -l "$TOOLCHAIN_BIN/aarch64-linux-android-ar" "$TOOLCHAIN_BIN/aarch64-linux-android-ld"
+          echo "Android NDK tools verified:"
+          ls -l "$TOOLCHAIN_BIN/llvm-ar" "$TOOLCHAIN_BIN/ld.lld" "$TOOLCHAIN_BIN/aarch64-linux-android29-clang"
 
       - name: Prepare experimental tree-friendly spawn biome
         if: github.ref_name == 'experiment/tree-generation'
@@ -262,7 +260,18 @@ jobs:
         run: cargo install cargo-quad-apk --locked
 
       - name: Build Android ARM64 APK
-        run: cargo --locked quad-apk build --release
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          # Use the NDK Clang driver, not ld.lld directly. Clang supplies the
+          # Android target runtime paths and links LLVM libunwind correctly.
+          export PATH="$TOOLCHAIN_BIN:$PATH"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOLCHAIN_BIN/aarch64-linux-android29-clang"
+          export CC_aarch64_linux_android="$TOOLCHAIN_BIN/aarch64-linux-android29-clang"
+          export AR_aarch64_linux_android="$TOOLCHAIN_BIN/llvm-ar"
+          "$TOOLCHAIN_BIN/aarch64-linux-android29-clang" --version
+          cargo --locked quad-apk build --release
 
       - name: Find generated APK
         id: apk
