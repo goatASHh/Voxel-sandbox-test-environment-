@@ -45,6 +45,26 @@ jobs:
           fi
           test -f Cargo.toml && test -d src
 
+      - name: Apply Macroquad API and Rust type fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src/main.rs")
+          s = p.read_text()
+          s = s.replace("            near: 0.1,", "            z_near: 0.1,")
+          s = s.replace("            far: 500.0,", "            z_far: 500.0,")
+          s = s.replace("draw_line(cx - 9.0, cy, cx + 9.0, cy, WHITE, 2.0)", "draw_line(cx - 9.0, cy, cx + 9.0, cy, 2.0, WHITE)")
+          s = s.replace("draw_line(cx, cy - 9.0, cx, cy + 9.0, WHITE, 2.0)", "draw_line(cx, cy - 9.0, cx, cy + 9.0, 2.0, WHITE)")
+          p.write_text(s)
+          p = Path("src/terrain.rs")
+          s = p.read_text().replace("let radius =", "let radius: i32 =")
+          p.write_text(s)
+          p = Path("src/renderer.rs")
+          s = p.read_text().replace("Vertex { position, uv: vec2(0.0, 0.0), color }", "Vertex { position, uv: vec2(0.0, 0.0), color, normal: vec4(0.0, 0.0, 0.0, 0.0) }")
+          p.write_text(s)
+          PY
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -87,6 +107,10 @@ jobs:
           nl -ba Cargo.toml | sed -n '1,140p'
           echo '--- Rust test locations ---'
           grep -R -n '#\[test\]\|tree_blocks_are_part_of_generated_world' src || true
+          echo '--- Full terrain generation and tree test source ---'
+          nl -ba src/terrain.rs | sed -n '1,280p'
+          echo '--- Android metadata keys ---'
+          grep -nE '^\\[package\\.metadata\\.android|^package|^package_name|^label|^assets|^build_targets|^min_sdk|^target_sdk' Cargo.toml
 
       - name: Verify Rust project is at repository root
         run: |
@@ -147,6 +171,13 @@ jobs:
           p.write_text(s)
           PY
           grep -nE 'near:|far:|draw_line\(cx|let radius|Vertex \{ position' src/main.rs src/terrain.rs src/renderer.rs
+
+      - name: Normalize cargo-quad-apk package metadata
+        shell: bash
+        run: |
+          sed -i 's/^package = /package_name = /' Cargo.toml
+          echo '--- Normalized Android metadata ---'
+          sed -n '24,40p' Cargo.toml
 
       - name: Generate dependency lockfile
         run: cargo generate-lockfile
