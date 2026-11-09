@@ -173,7 +173,7 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
-      - name: Add Android NDK archive-tool compatibility link
+      - name: Add Android NDK linker compatibility wrapper
         shell: bash
         run: |
           set -euo pipefail
@@ -182,11 +182,35 @@ jobs:
           test -x "$TOOLCHAIN_BIN/ld.lld"
           test -x "$TOOLCHAIN_BIN/aarch64-linux-android29-clang"
           ln -sf llvm-ar "$TOOLCHAIN_BIN/aarch64-linux-android-ar"
-          # cargo-quad-apk expects this legacy linker filename. Point it at
-          # the NDK Clang driver so target/sysroot runtime libraries are set up.
-          ln -sf aarch64-linux-android29-clang "$TOOLCHAIN_BIN/aarch64-linux-android-ld"
+          # Rust/cargo-quad-apk supplies GNU ld flags directly. Clang needs
+          # linker-only options forwarded with -Wl, while still supplying the
+          # Android sysroot and runtime library search paths.
+          cat > "$TOOLCHAIN_BIN/aarch64-linux-android-ld" <<'WRAPPER'
+          #!/usr/bin/env python3
+          import os
+          import sys
+          clang = os.path.join(os.path.dirname(os.path.realpath(__file__)), "aarch64-linux-android29-clang")
+          source = sys.argv[1:]
+          forwarded = []
+          i = 0
+          while i < len(source):
+              arg = source[i]
+              if arg == "-z" and i + 1 < len(source):
+                  forwarded.append("-Wl,-z," + source[i + 1])
+                  i += 2
+                  continue
+              if arg == "-strip-all":
+                  forwarded.append("-Wl,--strip-all")
+              elif arg.startswith("--"):
+                  forwarded.append("-Wl," + arg)
+              else:
+                  forwarded.append(arg)
+              i += 1
+          os.execv(clang, [clang, *forwarded])
+          WRAPPER
+          chmod +x "$TOOLCHAIN_BIN/aarch64-linux-android-ld"
           test -x "$TOOLCHAIN_BIN/aarch64-linux-android-ld"
-          echo "Android NDK tools verified:"
+          echo "Android NDK tools and linker wrapper verified:"
           ls -l "$TOOLCHAIN_BIN/llvm-ar" "$TOOLCHAIN_BIN/aarch64-linux-android29-clang" "$TOOLCHAIN_BIN/aarch64-linux-android-ld"
 
       - name: Prepare experimental tree-friendly spawn biome
@@ -268,13 +292,13 @@ jobs:
         run: |
           set -euo pipefail
           TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          # Use the NDK Clang driver, not ld.lld directly. Clang supplies the
-          # Android target runtime paths and links LLVM libunwind correctly.
+          # The wrapper forwards GNU ld flags to Clang while retaining the NDK sysroot.
           export PATH="$TOOLCHAIN_BIN:$PATH"
-          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOLCHAIN_BIN/aarch64-linux-android29-clang"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOLCHAIN_BIN/aarch64-linux-android-ld"
           export CC_aarch64_linux_android="$TOOLCHAIN_BIN/aarch64-linux-android29-clang"
           export AR_aarch64_linux_android="$TOOLCHAIN_BIN/llvm-ar"
           "$TOOLCHAIN_BIN/aarch64-linux-android29-clang" --version
+          "$TOOLCHAIN_BIN/aarch64-linux-android-ld" --version
           cargo --locked quad-apk build --release
 
       - name: Find generated APK
