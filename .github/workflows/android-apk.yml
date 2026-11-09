@@ -179,9 +179,13 @@ jobs:
           set -euo pipefail
           TOOLCHAIN_BIN="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin"
           test -x "$TOOLCHAIN_BIN/llvm-ar"
+          test -x "$TOOLCHAIN_BIN/llvm-readelf"
           test -x "$TOOLCHAIN_BIN/ld.lld"
           test -x "$TOOLCHAIN_BIN/aarch64-linux-android29-clang"
           ln -sf llvm-ar "$TOOLCHAIN_BIN/aarch64-linux-android-ar"
+          # Rust's Android target tooling expects a target-prefixed readelf name,
+          # while modern NDKs provide the generic LLVM binary.
+          ln -sf llvm-readelf "$TOOLCHAIN_BIN/aarch64-linux-android-readelf"
           # Rust/cargo-quad-apk supplies GNU ld flags directly. Clang needs
           # linker-only options forwarded with -Wl, while still supplying the
           # Android sysroot and runtime library search paths.
