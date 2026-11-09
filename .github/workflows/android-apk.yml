@@ -1,0 +1,78 @@
+name: Build POCO F6 Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: poco-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Verify Rust project is at repository root
+        run: |
+          if [ ! -f Cargo.toml ] || [ ! -d src ]; then
+            echo "::error::Upload the project contents so Cargo.toml and src/ are at the repository root."
+            exit 1
+          fi
+
+      - name: Install Rust and Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Rust build files
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Android SDK and NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform and NDK packages
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+
+      - name: Configure Android NDK
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Generate dependency lockfile
+        run: cargo generate-lockfile
+
+      - name: Run Rust unit tests
+        run: cargo test --locked
+
+      - name: Install cargo-quad-apk
+        run: cargo install cargo-quad-apk --locked
+
+      - name: Build Android ARM64 APK
+        run: cargo --locked quad-apk build --release
+
+      - name: Find generated APK
+        id: apk
+        shell: bash
+        run: |
+          APK="$(find target -type f -name '*.apk' | head -n 1)"
+          if [ -z "$APK" ]; then
+            echo "No APK was generated. Build output follows:"
+            find target -maxdepth 8 -type f | sort | tail -n 160
+            exit 1
+          fi
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          sha256sum "$APK"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: poco-voxel-sandbox-arm64-apk
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+          retention-days: 14
