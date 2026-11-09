@@ -171,6 +171,22 @@ jobs:
       - name: Configure Android NDK
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
+      - name: Prepare experimental tree-friendly spawn biome
+        if: github.ref_name == 'experiment/tree-generation'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src/terrain.rs")
+          s = p.read_text()
+          old = "else if moisture < -0.38 && climate > -0.05 { Biome::Desert }"
+          new = "else if moisture < -0.38 && climate > 0.30 { Biome::Desert }"
+          if old not in s:
+              raise SystemExit("Expected biome rule was not found; refusing to alter unknown terrain code.")
+          p.write_text(s.replace(old, new, 1))
+          print("Experimental spawn biome adjusted: starting region is no longer forced into desert.")
+          PY
+
       - name: Apply Macroquad API and Rust type fixes
         shell: bash
         run: |
