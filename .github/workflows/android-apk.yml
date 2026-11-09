@@ -109,8 +109,12 @@ jobs:
           grep -R -n '#\[test\]\|tree_blocks_are_part_of_generated_world' src || true
           echo '--- Full terrain generation and tree test source ---'
           nl -ba src/terrain.rs | sed -n '1,280p'
+          echo '--- Block ID definitions ---'
+          nl -ba src/block.rs | sed -n '1,240p'
+          echo '--- Chunk storage and raw_blocks ---'
+          nl -ba src/chunk.rs | sed -n '1,180p'
           echo '--- Android metadata keys ---'
-          grep -nE '^\\[package\\.metadata\\.android|^package|^package_name|^label|^assets|^build_targets|^min_sdk|^target_sdk' Cargo.toml
+          grep -nE 'package|label|assets|build_targets|sdk' Cargo.toml || true
 
       - name: Verify Rust project is at repository root
         run: |
