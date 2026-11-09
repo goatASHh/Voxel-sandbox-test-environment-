@@ -173,6 +173,17 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
+      - name: Add Android NDK archive-tool compatibility link
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLCHAIN_BIN="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "$TOOLCHAIN_BIN/llvm-ar"
+          ln -sf llvm-ar "$TOOLCHAIN_BIN/aarch64-linux-android-ar"
+          test -x "$TOOLCHAIN_BIN/aarch64-linux-android-ar"
+          echo "Android archive tool compatibility link verified:"
+          ls -l "$TOOLCHAIN_BIN/aarch64-linux-android-ar"
+
       - name: Prepare experimental tree-friendly spawn biome
         if: github.ref_name == 'experiment/tree-generation'
         shell: bash
