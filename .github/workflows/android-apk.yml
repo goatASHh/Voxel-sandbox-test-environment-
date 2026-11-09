@@ -58,9 +58,6 @@ jobs:
       - name: Cache Rust build files
         uses: Swatinem/rust-cache@v2
 
-      - name: Install Android SDK and NDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android platform and NDK packages
         run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
 
