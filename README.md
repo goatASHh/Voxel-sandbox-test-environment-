@@ -20,10 +20,14 @@ Once the Rust project files are present:
 
 The workflow runs Rust unit tests before attempting the Android APK build.
 
-## Test scope
+## Version plan
 
-The fixed **3×3 chunk world is intentional**. It is a controlled test environment for movement, voxel editing, chunk seams, caves, persistence and performance—not an unfinished endless-world implementation.
+- **V1 — Main game:** original build on `main`; keep it unchanged.
+- **V2 — Tree-generation fix:** this branch is the V1-focused test build. It adjusts the starting biome conditions to make the spawn area tree-friendly and checks generated tree blocks. Its Android application ID is separate so it can coexist with V1.
+- **V3 — Biome Testing:** a later, separate experimental build with its own 3D test world, biome selection and regeneration controls. V3 is not implemented yet.
+
+The fixed **3×3 chunk world is intentional**. It is a controlled test environment, not an unfinished endless-world implementation.
 
 ## Current status
 
-The Dev10/Dev11 source candidate is not yet compiler-verified. No APK is claimed until GitHub Actions completes successfully. POCO F6 runtime compatibility still requires a device test after the APK is built.
+V2 Rust unit tests pass. The Android build is being retried after correcting the NDK environment variable and assigning V2 a distinct Android application ID. No APK is ready until the Android build succeeds and the artifact is available. POCO F6 runtime behavior still needs device testing.
