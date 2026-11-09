@@ -43,6 +43,14 @@ jobs:
             rsync -a --exclude='.github' "$PROJECT_DIR/" ./
           fi
 
+      - name: Inspect Android manifest and Rust tests
+        shell: bash
+        run: |
+          echo '--- Cargo.toml ---'
+          nl -ba Cargo.toml | sed -n '1,140p'
+          echo '--- Rust test locations ---'
+          grep -R -n '#\[test\]\|tree_blocks_are_part_of_generated_world' src || true
+
       - name: Verify Rust project is at repository root
         run: |
           if [ ! -f Cargo.toml ] || [ ! -d src ]; then
@@ -107,7 +115,7 @@ jobs:
         run: cargo generate-lockfile
 
       - name: Run Rust unit tests
-        run: cargo test --locked -- --skip tree_blocks_are_part_of_generated_world
+        run: cargo test --locked
 
       - name: Install cargo-quad-apk
         run: cargo install cargo-quad-apk --locked
