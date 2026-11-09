@@ -33,11 +33,12 @@ jobs:
           if [ -n "$ARCHIVE" ]; then
             mkdir -p /tmp/poco-source
             unzip -q "$ARCHIVE" -d /tmp/poco-source
-            PROJECT_DIR="$(find /tmp/poco-source -mindepth 1 -maxdepth 2 -type f -name Cargo.toml -printf '%h\\n' | head -n 1)"
-            if [ -z "$PROJECT_DIR" ]; then
+            CARGO_FILE="$(find /tmp/poco-source -mindepth 1 -maxdepth 3 -type f -name Cargo.toml -print -quit)"
+            if [ -z "$CARGO_FILE" ]; then
               echo "::error::The uploaded ZIP does not contain a Cargo.toml project."
               exit 1
             fi
+            PROJECT_DIR="$(dirname "$CARGO_FILE")"
             rsync -a --exclude='.github' "$PROJECT_DIR/" ./
           fi
 
