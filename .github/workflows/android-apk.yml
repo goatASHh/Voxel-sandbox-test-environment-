@@ -3,7 +3,7 @@ name: Build POCO F6 Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, 'experiment/tree-generation' ]
     paths:
       - '.github/workflows/android-apk.yml'
       - 'Cargo.toml'
@@ -204,7 +204,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: poco-voxel-sandbox-arm64-apk
+          name: ${{ github.ref_name == 'experiment/tree-generation' && 'poco-voxel-sandbox-tree-experiment-arm64-apk' || 'poco-voxel-sandbox-arm64-apk' }}
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
           retention-days: 14
