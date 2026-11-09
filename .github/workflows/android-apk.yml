@@ -222,7 +222,7 @@ jobs:
           if start is not None:
               end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("[")), len(lines))
               del lines[start:end]
-              p.write_text("\\n".join(lines) + "\\n")
+              p.write_text("\n".join(lines) + "\n")
           PY
           sed -i 's/^package = /package_name = /' Cargo.toml
           echo '--- Normalized Android metadata ---'
