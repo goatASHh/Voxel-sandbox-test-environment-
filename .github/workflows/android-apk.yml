@@ -153,6 +153,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Preserve Java 17 for Android DEX conversion
+        shell: bash
+        run: |
+          echo "JAVA17_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "Saved Java 17 runtime at $JAVA_HOME"
+
       - name: Install Android SDK command-line tools
         uses: android-actions/setup-android@v4
         with:
@@ -215,6 +221,14 @@ jobs:
           fi
           TMP="$(mktemp -d)"
           trap 'rm -rf "$TMP"' EXIT
+          # The legacy packager needs Java 8, but modern D8 bytecode requires
+          # Java 11+. Run only D8 under the preserved Java 17 runtime.
+          if [[ -z "${JAVA17_HOME:-}" || ! -x "$JAVA17_HOME/bin/java" ]]; then
+            echo "Java 17 runtime was not preserved for D8." >&2
+            exit 1
+          fi
+          export JAVA_HOME="$JAVA17_HOME"
+          export PATH="$JAVA_HOME/bin:$PATH"
           "$TOOL_DIR/d8" --min-api "$MIN_API" --output "$TMP" "${INPUTS[@]}"
           mkdir -p "$(dirname "$OUTPUT")"
           if [[ ! -f "$TMP/classes.dex" ]]; then
