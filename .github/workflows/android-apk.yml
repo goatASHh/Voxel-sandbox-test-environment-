@@ -147,6 +147,12 @@ jobs:
       - name: Cache Rust build files
         uses: Swatinem/rust-cache@v2
 
+      - name: Install Java 8 JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
       - name: Install Android SDK command-line tools
         uses: android-actions/setup-android@v4
         with:
