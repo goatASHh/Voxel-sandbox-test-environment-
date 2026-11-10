@@ -147,11 +147,11 @@ jobs:
       - name: Cache Rust build files
         uses: Swatinem/rust-cache@v2
 
-      - name: Install Java 8 JDK
+      - name: Install Java 17 JDK for Android SDK tools
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '8'
+          java-version: '17'
 
       - name: Install Android SDK command-line tools
         uses: android-actions/setup-android@v4
@@ -173,6 +173,15 @@ jobs:
             echo "SDK download failed (attempt $attempt); retrying in 20 seconds..."
             sleep 20
           done
+
+      # cargo-quad-apk 0.1.4 expects the Java 8 runtime archive (rt.jar).
+      # Install Java 8 only after sdkmanager has completed, because current
+      # Android command-line tools require Java 17 or newer.
+      - name: Install Java 8 JDK for legacy APK packager
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
 
       - name: Configure Android NDK
         run: |
