@@ -174,18 +174,6 @@ jobs:
             sleep 20
           done
 
-      # The legacy packager invokes javac against android-29/android.jar,
-      # but its generated MainActivity uses WindowInsets APIs introduced in API 30.
-      # Compile against API 30 stubs while retaining the project's target SDK 35.
-      - name: Provide API 30 compile stubs to legacy Android packager
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f "$ANDROID_HOME/platforms/android-30/android.jar"
-          test -f "$ANDROID_HOME/platforms/android-29/android.jar"
-          cp "$ANDROID_HOME/platforms/android-30/android.jar" "$ANDROID_HOME/platforms/android-29/android.jar"
-          echo "Legacy packager compile stubs now expose Android API 30."
-
       # cargo-quad-apk 0.1.4 expects the Java 8 runtime archive (rt.jar).
       # Install Java 8 only after sdkmanager has completed, because current
       # Android command-line tools require Java 17 or newer.
@@ -194,6 +182,50 @@ jobs:
         with:
           distribution: temurin
           java-version: '8'
+
+      # cargo-quad-apk 0.1.4 still invokes the removed dx interface.
+      # Modern Android Build Tools ship d8 instead; adapt the old arguments
+      # and place its dex output where the legacy packager expects it.
+      - name: Add legacy dx compatibility wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          test -x "$BUILD_TOOLS/d8"
+          cat > "$BUILD_TOOLS/dx" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          TOOL_DIR="$(cd "$(dirname "$0")" && pwd)"
+          OUTPUT=""
+          MIN_API="1"
+          INPUTS=()
+          while (($#)); do
+            case "$1" in
+              --dex) shift ;;
+              --output=*) OUTPUT="${1#*=}"; shift ;;
+              --output) OUTPUT="$2"; shift 2 ;;
+              --min-sdk-version) MIN_API="$2"; shift 2 ;;
+              --min-sdk-version=*) MIN_API="${1#*=}"; shift ;;
+              *) INPUTS+=("$1"); shift ;;
+            esac
+          done
+          if [[ -z "$OUTPUT" || ${#INPUTS[@]} -eq 0 ]]; then
+            echo "dx compatibility wrapper: missing output or input" >&2
+            exit 2
+          fi
+          TMP="$(mktemp -d)"
+          trap 'rm -rf "$TMP"' EXIT
+          "$TOOL_DIR/d8" --min-api "$MIN_API" --output "$TMP" "${INPUTS[@]}"
+          mkdir -p "$(dirname "$OUTPUT")"
+          if [[ ! -f "$TMP/classes.dex" ]]; then
+            echo "d8 did not produce classes.dex" >&2
+            find "$TMP" -maxdepth 1 -type f -print >&2
+            exit 1
+          fi
+          cp "$TMP/classes.dex" "$OUTPUT"
+          SH
+          chmod +x "$BUILD_TOOLS/dx"
+          echo "Installed dx-to-d8 compatibility wrapper at $BUILD_TOOLS/dx"
 
       - name: Configure Android NDK
         run: |
@@ -298,6 +330,16 @@ jobs:
               p.write_text("\n".join(lines) + "\n")
           PY
           sed -i 's/^package = /package_name = /' Cargo.toml
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("Cargo.toml")
+          lines = p.read_text().splitlines()
+          section = lines.index("[package.metadata.android]")
+          next_section = next((i for i in range(section + 1, len(lines)) if lines[i].startswith("[")), len(lines))
+          if not any(line.startswith("android_version =") for line in lines[section + 1:next_section]):
+              lines.insert(section + 1, "android_version = 30")
+          p.write_text("\n".join(lines) + "\n")
+          PY
           if [ "${GITHUB_REF_NAME}" = "experiment/tree-generation" ]; then
             sed -i 's/^package_name = .*/package_name = "com.pocovoxelsandbox.game.v2"/' Cargo.toml
           fi
