@@ -3,7 +3,7 @@ name: Build POCO F6 Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, 'experiment/tree-generation' ]
     paths:
       - '.github/workflows/android-apk.yml'
       - 'Cargo.toml'
@@ -13,7 +13,7 @@ on:
       - 'Poco_Voxel_Sandbox_Dev10_Dev11_working_source*.zip'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: poco-android-${{ github.ref }}
@@ -31,8 +31,14 @@ jobs:
       - name: Unpack uploaded game source ZIP
         shell: bash
         run: |
-          ARCHIVE="$(find . -maxdepth 1 -type f -iname 'Poco_Voxel_Sandbox_Dev10_Dev11_working_source*.zip' | head -n 1)"
-          if [ -n "$ARCHIVE" ]; then
+          if [ -f Cargo.toml ] && [ -d src ]; then
+            echo "Using the committed Rust project at the repository root."
+          else
+            ARCHIVE="$(find . -maxdepth 1 -type f -iname 'Poco_Voxel_Sandbox_Dev10_Dev11_working_source*.zip' | head -n 1)"
+            if [ -z "$ARCHIVE" ]; then
+              echo "::error::No root Rust project or uploaded source ZIP was found."
+              exit 1
+            fi
             mkdir -p /tmp/poco-source
             unzip -q "$ARCHIVE" -d /tmp/poco-source
             CARGO_FILE="$(find /tmp/poco-source -mindepth 1 -maxdepth 3 -type f -name Cargo.toml -print -quit)"
@@ -44,6 +50,25 @@ jobs:
             rsync -a --exclude='.github' "$PROJECT_DIR/" ./
           fi
           test -f Cargo.toml && test -d src
+
+      - name: Apply tree-friendly spawn biome rule
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src/terrain.rs")
+          s = p.read_text()
+          old = "else if moisture < -0.38 && climate > -0.05 { Biome::Desert }"
+          new = "else if moisture < -0.38 && climate > 0.30 { Biome::Desert }"
+          if old in s:
+              s = s.replace(old, new, 1)
+              p.write_text(s)
+              print("Adjusted desert threshold so the fixed starting region can include tree-capable meadow/forest terrain.")
+          elif new in s:
+              print("Tree-friendly spawn biome rule is already present.")
+          else:
+              raise SystemExit("Expected biome rule was not found; refusing to alter unknown terrain code.")
+          PY
 
       - name: Apply Macroquad API and Rust type fixes
         shell: bash
@@ -78,6 +103,7 @@ jobs:
         run: cargo test --locked
 
   android-arm64:
+    needs: rust-tests
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -87,8 +113,14 @@ jobs:
       - name: Unpack uploaded game source ZIP
         shell: bash
         run: |
-          ARCHIVE="$(find . -maxdepth 1 -type f -iname 'Poco_Voxel_Sandbox_Dev10_Dev11_working_source*.zip' | head -n 1)"
-          if [ -n "$ARCHIVE" ]; then
+          if [ -f Cargo.toml ] && [ -d src ]; then
+            echo "Using the committed Rust project at the repository root."
+          else
+            ARCHIVE="$(find . -maxdepth 1 -type f -iname 'Poco_Voxel_Sandbox_Dev10_Dev11_working_source*.zip' | head -n 1)"
+            if [ -z "$ARCHIVE" ]; then
+              echo "::error::No root Rust project or uploaded source ZIP was found."
+              exit 1
+            fi
             mkdir -p /tmp/poco-source
             unzip -q "$ARCHIVE" -d /tmp/poco-source
             CARGO_FILE="$(find /tmp/poco-source -mindepth 1 -maxdepth 3 -type f -name Cargo.toml -print -quit)"
@@ -109,8 +141,12 @@ jobs:
           grep -R -n '#\[test\]\|tree_blocks_are_part_of_generated_world' src || true
           echo '--- Full terrain generation and tree test source ---'
           nl -ba src/terrain.rs | sed -n '1,280p'
+          echo '--- Block ID definitions ---'
+          nl -ba src/block.rs | sed -n '1,240p'
+          echo '--- Chunk storage and raw_blocks ---'
+          nl -ba src/chunk.rs | sed -n '1,180p'
           echo '--- Android metadata keys ---'
-          grep -nE '^\\[package\\.metadata\\.android|^package|^package_name|^label|^assets|^build_targets|^min_sdk|^target_sdk' Cargo.toml
+          grep -nE 'package|label|assets|build_targets|sdk' Cargo.toml || true
 
       - name: Verify Rust project is at repository root
         run: |
@@ -127,6 +163,18 @@ jobs:
       - name: Cache Rust build files
         uses: Swatinem/rust-cache@v2
 
+      - name: Install Java 17 JDK for Android SDK tools
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Preserve Java 17 for Android DEX conversion
+        shell: bash
+        run: |
+          echo "JAVA17_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "Saved Java 17 runtime at $JAVA_HOME"
+
       - name: Install Android SDK command-line tools
         uses: android-actions/setup-android@v4
         with:
@@ -137,7 +185,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3 4; do
-            if sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"; then
+            if sdkmanager --install "platform-tools" "platforms;android-29" "platforms;android-30" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"; then
               exit 0
             fi
             if [ "$attempt" -eq 4 ]; then
@@ -148,8 +196,152 @@ jobs:
             sleep 20
           done
 
+      # cargo-quad-apk 0.1.4 expects the Java 8 runtime archive (rt.jar).
+      # Install Java 8 only after sdkmanager has completed, because current
+      # Android command-line tools require Java 17 or newer.
+      - name: Install Java 8 JDK for legacy APK packager
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      # cargo-quad-apk 0.1.4 still invokes the removed dx interface.
+      # Modern Android Build Tools ship d8 instead; adapt the old arguments
+      # and place its dex output where the legacy packager expects it.
+      - name: Add legacy dx compatibility wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          test -x "$BUILD_TOOLS/d8"
+          cat > "$BUILD_TOOLS/dx" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          TOOL_DIR="$(cd "$(dirname "$0")" && pwd)"
+          OUTPUT=""
+          MIN_API="1"
+          INPUTS=()
+          while (($#)); do
+            case "$1" in
+              --dex) shift ;;
+              --output=*) OUTPUT="${1#*=}"; shift ;;
+              --output) OUTPUT="$2"; shift 2 ;;
+              --min-sdk-version) MIN_API="$2"; shift 2 ;;
+              --min-sdk-version=*) MIN_API="${1#*=}"; shift ;;
+              *) INPUTS+=("$1"); shift ;;
+            esac
+          done
+          if [[ -z "$OUTPUT" || ${#INPUTS[@]} -eq 0 ]]; then
+            echo "dx compatibility wrapper: missing output or input" >&2
+            exit 2
+          fi
+          TMP="$(mktemp -d)"
+          trap 'rm -rf "$TMP"' EXIT
+          # The legacy packager needs Java 8, but modern D8 bytecode requires
+          # Java 11+. Run only D8 under the preserved Java 17 runtime.
+          if [[ -z "${JAVA17_HOME:-}" || ! -x "$JAVA17_HOME/bin/java" ]]; then
+            echo "Java 17 runtime was not preserved for D8." >&2
+            exit 1
+          fi
+          export JAVA_HOME="$JAVA17_HOME"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          # D8 accepts class files and JARs, not the raw directory that the
+          # legacy dx caller passes. Package directory inputs as temporary JARs.
+          DEX_INPUTS=()
+          INDEX=0
+          for INPUT in "${INPUTS[@]}"; do
+            if [[ -d "$INPUT" ]]; then
+              if ! find "$INPUT" -type f -name '*.class' -print -quit | grep -q .; then
+                echo "No .class files found in legacy dx input directory: $INPUT" >&2
+                exit 1
+              fi
+              ARCHIVE="$TMP/program-$INDEX.jar"
+              (cd "$INPUT" && "$JAVA_HOME/bin/jar" cf "$ARCHIVE" .)
+              DEX_INPUTS+=("$ARCHIVE")
+            else
+              DEX_INPUTS+=("$INPUT")
+            fi
+            INDEX=$((INDEX + 1))
+          done
+          "$TOOL_DIR/d8" --min-api "$MIN_API" --output "$TMP" "${DEX_INPUTS[@]}"
+          mkdir -p "$(dirname "$OUTPUT")"
+          if [[ ! -f "$TMP/classes.dex" ]]; then
+            echo "d8 did not produce classes.dex" >&2
+            find "$TMP" -maxdepth 1 -type f -print >&2
+            exit 1
+          fi
+          cp "$TMP/classes.dex" "$OUTPUT"
+          SH
+          chmod +x "$BUILD_TOOLS/dx"
+          echo "Installed dx-to-d8 compatibility wrapper at $BUILD_TOOLS/dx"
+
       - name: Configure Android NDK
-        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Add Android NDK linker compatibility wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLCHAIN_BIN="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "$TOOLCHAIN_BIN/llvm-ar"
+          test -x "$TOOLCHAIN_BIN/llvm-readelf"
+          test -x "$TOOLCHAIN_BIN/ld.lld"
+          test -x "$TOOLCHAIN_BIN/aarch64-linux-android29-clang"
+          ln -sf llvm-ar "$TOOLCHAIN_BIN/aarch64-linux-android-ar"
+          # Rust's Android target tooling expects a target-prefixed readelf name,
+          # while modern NDKs provide the generic LLVM binary.
+          ln -sf llvm-readelf "$TOOLCHAIN_BIN/aarch64-linux-android-readelf"
+          # Rust/cargo-quad-apk supplies GNU ld flags directly. Clang needs
+          # linker-only options forwarded with -Wl, while still supplying the
+          # Android sysroot and runtime library search paths.
+          cat > "$TOOLCHAIN_BIN/aarch64-linux-android-ld" <<'WRAPPER'
+          #!/usr/bin/env python3
+          import os
+          import sys
+          clang = os.path.join(os.path.dirname(os.path.realpath(__file__)), "aarch64-linux-android29-clang")
+          source = sys.argv[1:]
+          forwarded = []
+          i = 0
+          while i < len(source):
+              arg = source[i]
+              if arg == "-z" and i + 1 < len(source):
+                  forwarded.append("-Wl,-z," + source[i + 1])
+                  i += 2
+                  continue
+              if arg == "-strip-all":
+                  forwarded.append("-Wl,--strip-all")
+              elif arg.startswith("--"):
+                  forwarded.append("-Wl," + arg)
+              else:
+                  forwarded.append(arg)
+              i += 1
+          os.execv(clang, [clang, *forwarded])
+          WRAPPER
+          chmod +x "$TOOLCHAIN_BIN/aarch64-linux-android-ld"
+          test -x "$TOOLCHAIN_BIN/aarch64-linux-android-ld"
+          echo "Android NDK tools and linker wrapper verified:"
+          ls -l "$TOOLCHAIN_BIN/llvm-ar" "$TOOLCHAIN_BIN/aarch64-linux-android29-clang" "$TOOLCHAIN_BIN/aarch64-linux-android-ld"
+
+      - name: Apply tree-friendly spawn biome rule
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src/terrain.rs")
+          s = p.read_text()
+          old = "else if moisture < -0.38 && climate > -0.05 { Biome::Desert }"
+          new = "else if moisture < -0.38 && climate > 0.30 { Biome::Desert }"
+          if old in s:
+              s = s.replace(old, new, 1)
+              p.write_text(s)
+              print("Adjusted desert threshold so the fixed starting region can include tree-capable meadow/forest terrain.")
+          elif new in s:
+              print("Tree-friendly spawn biome rule is already present.")
+          else:
+              raise SystemExit("Expected biome rule was not found; refusing to alter unknown terrain code.")
+          PY
 
       - name: Apply Macroquad API and Rust type fixes
         shell: bash
@@ -172,21 +364,63 @@ jobs:
           PY
           grep -nE 'near:|far:|draw_line\(cx|let radius|Vertex \{ position' src/main.rs src/terrain.rs src/renderer.rs
 
-      - name: Normalize cargo-quad-apk package metadata
+      - name: Remove unsupported nested Android application metadata
         shell: bash
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("Cargo.toml")
+          lines = p.read_text().splitlines()
+          try:
+              start = lines.index("[package.metadata.android.application]")
+          except ValueError:
+              start = None
+          if start is not None:
+              end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("[")), len(lines))
+              del lines[start:end]
+              p.write_text("\n".join(lines) + "\n")
+          PY
           sed -i 's/^package = /package_name = /' Cargo.toml
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("Cargo.toml")
+          lines = p.read_text().splitlines()
+          section = lines.index("[package.metadata.android]")
+          next_section = next((i for i in range(section + 1, len(lines)) if lines[i].startswith("[")), len(lines))
+          if not any(line.startswith("android_version =") for line in lines[section + 1:next_section]):
+              lines.insert(section + 1, "android_version = 30")
+          p.write_text("\n".join(lines) + "\n")
+          PY
           echo '--- Normalized Android metadata ---'
           sed -n '24,40p' Cargo.toml
 
       - name: Generate dependency lockfile
         run: cargo generate-lockfile
 
+      - name: Set compatible lockfile format for Android packager
+        shell: bash
+        run: |
+          # cargo-quad-apk 0.1.4 uses an older Cargo parser that cannot read lockfile v4.
+          # The generated dependency graph is compatible with lockfile format v3.
+          sed -i 's/^version = 4$/version = 3/' Cargo.lock
+          head -n 5 Cargo.lock
+
       - name: Install cargo-quad-apk
         run: cargo install cargo-quad-apk --locked
 
       - name: Build Android ARM64 APK
-        run: cargo --locked quad-apk build --release
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          # The wrapper forwards GNU ld flags to Clang while retaining the NDK sysroot.
+          export PATH="$TOOLCHAIN_BIN:$PATH"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOLCHAIN_BIN/aarch64-linux-android-ld"
+          export CC_aarch64_linux_android="$TOOLCHAIN_BIN/aarch64-linux-android29-clang"
+          export AR_aarch64_linux_android="$TOOLCHAIN_BIN/llvm-ar"
+          "$TOOLCHAIN_BIN/aarch64-linux-android29-clang" --version
+          "$TOOLCHAIN_BIN/aarch64-linux-android-ld" --version
+          cargo --locked quad-apk build --release
 
       - name: Find generated APK
         id: apk
@@ -201,10 +435,44 @@ jobs:
           echo "path=$APK" >> "$GITHUB_OUTPUT"
           sha256sum "$APK"
 
+      - name: Verify APK architecture, package and signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="${{ steps.apk.outputs.path }}"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          EXPECTED_PACKAGE="com.pocovoxelsandbox.game"
+          if [ "$GITHUB_REF_NAME" = "experiment/tree-generation" ]; then
+            EXPECTED_PACKAGE="com.pocovoxelsandbox.game.v2"
+          fi
+          "$BUILD_TOOLS/aapt" dump badging "$APK" | tee "$RUNNER_TEMP/apk-badging.txt"
+          grep -Fq "name='$EXPECTED_PACKAGE'" "$RUNNER_TEMP/apk-badging.txt"
+          if ! unzip -l "$APK" | grep -q 'lib/arm64-v8a/.*\.so'; then
+            echo "::error::APK does not contain an ARM64 native library."
+            exit 1
+          fi
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apk-signature.txt"
+          echo "Verified package=$EXPECTED_PACKAGE ABI=arm64-v8a"
+          sha256sum "$APK"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: poco-voxel-sandbox-arm64-apk
+          name: ${{ github.ref_name == 'experiment/tree-generation' && 'poco-voxel-sandbox-v2-tree-fix-arm64-apk' || 'poco-voxel-sandbox-arm64-apk' }}
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
           retention-days: 14
+
+      - name: Commit prepared source to repository root
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f Cargo.toml Cargo.lock src assets
+          if git diff --cached --quiet; then
+            echo "Root source is already committed; no source commit needed."
+          else
+            git commit -m "Commit prepared POCO voxel sandbox Rust source"
+            git push origin "HEAD:$GITHUB_REF_NAME"
+          fi
