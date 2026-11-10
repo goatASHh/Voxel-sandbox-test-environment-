@@ -163,7 +163,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3 4; do
-            if sdkmanager --install "platform-tools" "platforms;android-29" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"; then
+            if sdkmanager --install "platform-tools" "platforms;android-29" "platforms;android-30" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"; then
               exit 0
             fi
             if [ "$attempt" -eq 4 ]; then
@@ -173,6 +173,18 @@ jobs:
             echo "SDK download failed (attempt $attempt); retrying in 20 seconds..."
             sleep 20
           done
+
+      # The legacy packager invokes javac against android-29/android.jar,
+      # but its generated MainActivity uses WindowInsets APIs introduced in API 30.
+      # Compile against API 30 stubs while retaining the project's target SDK 35.
+      - name: Provide API 30 compile stubs to legacy Android packager
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$ANDROID_HOME/platforms/android-30/android.jar"
+          test -f "$ANDROID_HOME/platforms/android-29/android.jar"
+          cp "$ANDROID_HOME/platforms/android-30/android.jar" "$ANDROID_HOME/platforms/android-29/android.jar"
+          echo "Legacy packager compile stubs now expose Android API 30."
 
       # cargo-quad-apk 0.1.4 expects the Java 8 runtime archive (rt.jar).
       # Install Java 8 only after sdkmanager has completed, because current
