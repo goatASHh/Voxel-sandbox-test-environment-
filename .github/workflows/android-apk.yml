@@ -317,6 +317,8 @@ jobs:
               else:
                   forwarded.append(arg)
               i += 1
+          # Android 16 KB page-size compatibility for newer Android devices.
+          forwarded.extend(["-Wl,-z,max-page-size=16384", "-Wl,-z,common-page-size=16384"])
           os.execv(clang, [clang, *forwarded])
           WRAPPER
           chmod +x "$TOOLCHAIN_BIN/aarch64-linux-android-ld"
