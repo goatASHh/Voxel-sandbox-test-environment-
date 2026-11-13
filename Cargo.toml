@@ -22,11 +22,10 @@ codegen-units = 1
 panic = "abort"
 
 [package.metadata.android]
-android_version = 30
+android_version = 35
 package_name = "com.pocovoxelsandbox.game"
 label = "Poco Voxel Sandbox"
 assets = "assets"
 build_targets = ["aarch64-linux-android"]
 min_sdk_version = 26
 target_sdk_version = 35
-
