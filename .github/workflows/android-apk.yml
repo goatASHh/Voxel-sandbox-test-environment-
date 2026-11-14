@@ -185,7 +185,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3 4; do
-            if sdkmanager --install "platform-tools" "platforms;android-29" "platforms;android-30" "platforms;android-35" "emulator" "system-images;android-30;google_apis;arm64-v8a" "build-tools;35.0.0" "ndk;27.2.12479018"; then
+            if sdkmanager --install "platform-tools" "platforms;android-29" "platforms;android-30" "platforms;android-35" "platforms;android-36" "emulator" "system-images;android-36;google_apis;arm64-v8a" "build-tools;35.0.0" "ndk;27.2.12479018"; then
               exit 0
             fi
             if [ "$attempt" -eq 4 ]; then
@@ -464,10 +464,20 @@ jobs:
           PACKAGE_ID: ${{ github.ref_name == 'experiment/tree-generation' && 'com.pocovoxelsandbox.game.v2' || 'com.pocovoxelsandbox.game' }}
         run: |
           set -euo pipefail
-          IMAGE="system-images;android-30;google_apis;arm64-v8a"
-          AVD_NAME="poco-arm64-test"
+          # Android SDK emulator tools require Java 17+. The APK packager
+          # above uses Java 8, so explicitly restore Java 17 for this step.
+          if [[ -z "${JAVA17_HOME:-}" || ! -x "$JAVA17_HOME/bin/java" ]]; then
+            echo "::error::Preserved Java 17 runtime is unavailable."
+            exit 1
+          fi
+          export JAVA_HOME="$JAVA17_HOME"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          java -version
 
-          echo "Creating ARM64 Android 11 emulator..."
+          IMAGE="system-images;android-36;google_apis;arm64-v8a"
+          AVD_NAME="poco-android16-arm64-test"
+
+          echo "Creating ARM64 Android 16 (API 36) emulator..."
           echo "no" | avdmanager create avd --force --name "$AVD_NAME" --package "$IMAGE" --device "pixel_2"
 
           adb start-server
@@ -481,7 +491,7 @@ jobs:
           }
           trap cleanup EXIT
 
-          echo "Waiting for emulator device..."
+          echo "Waiting for Android 16 emulator device..."
           adb wait-for-device
           for attempt in $(seq 1 120); do
             BOOTED="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\\r' || true)"
@@ -489,12 +499,12 @@ jobs:
               break
             fi
             if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then
-              echo "::error::ARM64 emulator exited before boot completed."
+              echo "::error::Android 16 ARM64 emulator exited before boot completed."
               cat "$RUNNER_TEMP/emulator.log"
               exit 1
             fi
             if [ "$attempt" -eq 120 ]; then
-              echo "::error::ARM64 emulator did not finish booting within 10 minutes."
+              echo "::error::Android 16 ARM64 emulator did not finish booting within 10 minutes."
               cat "$RUNNER_TEMP/emulator.log"
               adb logcat -d -t 1000 || true
               exit 1
@@ -517,7 +527,7 @@ jobs:
             exit 1
           fi
           adb shell dumpsys activity activities | grep -F "$PACKAGE_ID" || true
-          echo "PASS: ARM64 APK installed and its app process remained alive."
+          echo "PASS: ARM64 APK installed and remained running on Android 16 (API 36)."
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
