@@ -185,7 +185,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3 4; do
-            if sdkmanager --install "platform-tools" "platforms;android-29" "platforms;android-30" "platforms;android-35" "system-images;android-30;google_apis;x86_64" "build-tools;35.0.0" "ndk;27.2.12479018"; then
+            if sdkmanager --install "platform-tools" "platforms;android-29" "platforms;android-30" "platforms;android-35" "emulator" "system-images;android-30;google_apis;arm64-v8a" "build-tools;35.0.0" "ndk;27.2.12479018"; then
               exit 0
             fi
             if [ "$attempt" -eq 4 ]; then
@@ -457,33 +457,67 @@ jobs:
           echo "Verified package=$EXPECTED_PACKAGE ABI=arm64-v8a"
           sha256sum "$APK"
 
-      - name: Install and launch APK in Android 11 emulator
-        uses: reactivecircus/android-emulator-runner@v2
+      - name: Install and launch ARM64 APK in ARM64 Android emulator
+        shell: bash
         env:
           APK_PATH: ${{ steps.apk.outputs.path }}
           PACKAGE_ID: ${{ github.ref_name == 'experiment/tree-generation' && 'com.pocovoxelsandbox.game.v2' || 'com.pocovoxelsandbox.game' }}
-        with:
-          api-level: 30
-          target: google_apis
-          arch: x86_64
-          profile: pixel_2
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          disable-animations: true
-          script: |
-            set -euo pipefail
-            echo "Installing exact ARM64 APK: $APK_PATH"
-            adb install -r "$APK_PATH"
-            echo "Launching package: $PACKAGE_ID"
-            adb shell monkey -p "$PACKAGE_ID" 1
-            sleep 10
-            if ! adb shell pidof "$PACKAGE_ID" | tr -d '\\r' | grep -q '[0-9]'; then
-              echo "::error::APK installed, but its process did not remain running after launch."
-              adb logcat -d -t 1500
+        run: |
+          set -euo pipefail
+          IMAGE="system-images;android-30;google_apis;arm64-v8a"
+          AVD_NAME="poco-arm64-test"
+
+          echo "Creating ARM64 Android 11 emulator..."
+          echo "no" | avdmanager create avd --force --name "$AVD_NAME" --package "$IMAGE" --device "pixel_2"
+
+          adb start-server
+          emulator -avd "$AVD_NAME" \
+            -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim \
+            -accel off -no-metrics > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          EMULATOR_PID=$!
+          cleanup() {
+            adb -s emulator-5554 emu kill >/dev/null 2>&1 || true
+            kill "$EMULATOR_PID" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          echo "Waiting for emulator device..."
+          adb wait-for-device
+          for attempt in $(seq 1 120); do
+            BOOTED="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\\r' || true)"
+            if [ "$BOOTED" = "1" ]; then
+              break
+            fi
+            if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then
+              echo "::error::ARM64 emulator exited before boot completed."
+              cat "$RUNNER_TEMP/emulator.log"
               exit 1
             fi
-            adb shell dumpsys activity activities | grep -F "$PACKAGE_ID" || true
-            echo "PASS: APK installed and its app process remained alive."
+            if [ "$attempt" -eq 120 ]; then
+              echo "::error::ARM64 emulator did not finish booting within 10 minutes."
+              cat "$RUNNER_TEMP/emulator.log"
+              adb logcat -d -t 1000 || true
+              exit 1
+            fi
+            sleep 5
+          done
 
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+
+          echo "Installing exact ARM64 APK: $APK_PATH"
+          adb install -r "$APK_PATH"
+          echo "Launching package: $PACKAGE_ID"
+          adb shell monkey -p "$PACKAGE_ID" 1
+          sleep 10
+          if ! adb shell pidof "$PACKAGE_ID" | tr -d '\\r' | grep -q '[0-9]'; then
+            echo "::error::APK installed, but its process did not remain running after launch."
+            adb logcat -d -t 1500
+            exit 1
+          fi
+          adb shell dumpsys activity activities | grep -F "$PACKAGE_ID" || true
+          echo "PASS: ARM64 APK installed and its app process remained alive."
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
