@@ -488,7 +488,7 @@ jobs:
                           break
                   attrs.append(child)
               activity_attrs = "\\n".join(attrs)
-              if "com.pocovoxelsandbox.game.MainActivity" in activity_attrs:
+              if "android:name" in activity_attrs and ".MainActivity" in activity_attrs:
                   if "android:exported" in activity_attrs and (
                       "0xffffffff" in activity_attrs.lower() or "true" in activity_attrs.lower()
                   ):
