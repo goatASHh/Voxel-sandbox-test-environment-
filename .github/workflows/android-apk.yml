@@ -503,7 +503,7 @@ jobs:
 
           # cargo-quad-apk derives its native target name from Cargo's target
           # and its Java loadLibrary name from the final package_name component.
-          if "android.app.lib_name" not in text or 'android:value="game"' not in text:
+          if "android.app.lib_name" not in text or not any("android:value" in line and '"game"' in line for line in text.splitlines()):
               raise SystemExit("ERROR: Android manifest native library metadata must be 'game'.")
           print("PASS: Android native library metadata is 'game'")
           PY
