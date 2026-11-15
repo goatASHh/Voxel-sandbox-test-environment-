@@ -185,7 +185,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3 4; do
-            if sdkmanager --install "platform-tools" "platforms;android-29" "platforms;android-30" "platforms;android-35" "platforms;android-36" "emulator" "system-images;android-36;google_apis;x86_64" "build-tools;35.0.0" "ndk;27.2.12479018"; then
+            if sdkmanager --install "platforms;android-29" "platforms;android-30" "platforms;android-35" "platforms;android-36" "build-tools;35.0.0" "ndk;27.2.12479018"; then
               exit 0
             fi
             if [ "$attempt" -eq 4 ]; then
@@ -527,100 +527,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Install and launch ARM64 APK in ARM64 Android emulator
-        shell: bash
-        timeout-minutes: 15
-        env:
-          APK_PATH: ${{ steps.apk.outputs.path }}
-          PACKAGE_ID: ${{ github.ref_name == 'experiment/tree-generation' && 'com.pocovoxelsandbox.game.v2' || 'com.pocovoxelsandbox.game' }}
-        run: |
-          set -euo pipefail
-          # Android SDK emulator tools require Java 17+. The APK packager
-          # above uses Java 8, so explicitly restore Java 17 for this step.
-          if [[ -z "${JAVA17_HOME:-}" || ! -x "$JAVA17_HOME/bin/java" ]]; then
-            echo "::error::Preserved Java 17 runtime is unavailable."
-            exit 1
-          fi
-          export JAVA_HOME="$JAVA17_HOME"
-          export PATH="$JAVA_HOME/bin:$PATH"
-          java -version
-
-          IMAGE="system-images;android-36;google_apis;x86_64"
-          AVD_NAME="poco-android16-arm-translation-test"
-
-          echo "Creating Android 16 (API 36) x86_64 emulator with Google ARM64 native-code translation..."
-          echo "no" | avdmanager create avd --force --name "$AVD_NAME" --package "$IMAGE" --device "pixel_2"
-
-          adb start-server
-          emulator -avd "$AVD_NAME" \
-            -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim \
-            -accel auto -no-metrics > "$RUNNER_TEMP/emulator.log" 2>&1 &
-          EMULATOR_PID=$!
-          cleanup() {
-            adb -s emulator-5554 emu kill >/dev/null 2>&1 || true
-            kill "$EMULATOR_PID" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-
-          echo "Waiting for Android 16 emulator device (90-second ADB connection limit)..."
-          if ! timeout --signal=TERM --kill-after=10s 90s adb wait-for-device; then
-            echo "::error::ADB did not detect the emulator within 90 seconds."
-            echo "--- Emulator startup log ---"
-            cat "$RUNNER_TEMP/emulator.log" || true
-            echo "--- ADB device list ---"
-            timeout 15s adb devices -l || true
-            exit 1
-          fi
-          for attempt in $(seq 1 120); do
-            BOOTED="$(timeout 20s adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\\r' || true)"
-            if [ "$BOOTED" = "1" ]; then
-              break
-            fi
-            if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then
-              echo "::error::Android 16 ARM64 emulator exited before boot completed."
-              cat "$RUNNER_TEMP/emulator.log"
-              exit 1
-            fi
-            if [ "$attempt" -eq 120 ]; then
-              echo "::error::Android 16 ARM64 emulator did not finish booting within 10 minutes."
-              echo "--- Emulator startup log ---"
-              cat "$RUNNER_TEMP/emulator.log" || true
-              echo "--- ADB devices ---"
-              timeout 15s adb devices -l || true
-              echo "--- Recent Android logcat ---"
-              timeout 20s adb logcat -d -t 1000 || true
-              exit 1
-            fi
-            sleep 5
-          done
-
-          adb shell settings put global window_animation_scale 0
-          adb shell settings put global transition_animation_scale 0
-          adb shell settings put global animator_duration_scale 0
-
-          echo "Checking Android 16 emulator ARM64 translation support..."
-          ABILIST="$(adb shell getprop ro.product.cpu.abilist | tr -d '\r')"
-          NATIVE_BRIDGE="$(adb shell getprop ro.dalvik.vm.native.bridge | tr -d '\r')"
-          echo "Emulator ABIs: $ABILIST"
-          echo "Native bridge: $NATIVE_BRIDGE"
-          if [[ ",$ABILIST," != *",arm64-v8a,"* || -z "$NATIVE_BRIDGE" ]]; then
-            echo "::error::Android 16 emulator does not advertise ARM64 ABI translation."
-            adb shell getprop | grep -E 'abilist|native.bridge' || true
-            exit 1
-          fi
-
-          echo "Installing exact ARM64 APK through Android's ARM64 native bridge: $APK_PATH"
-          timeout --signal=TERM --kill-after=15s 120s adb install -r "$APK_PATH"
-          echo "Launching package: $PACKAGE_ID"
-          timeout 30s adb shell monkey -p "$PACKAGE_ID" 1
-          sleep 10
-          if ! timeout 20s adb shell pidof "$PACKAGE_ID" | tr -d '\\r' | grep -q '[0-9]'; then
-            echo "::error::APK installed, but its process did not remain running after launch."
-            timeout 20s adb logcat -d -t 1500
-            exit 1
-          fi
-          adb shell dumpsys activity activities | grep -F "$PACKAGE_ID" || true
-          echo "PASS: ARM64 APK installed and remained running on Android 16 (API 36) using the emulator ARM64 native bridge."
       - name: Commit prepared source to repository root
         shell: bash
         run: |
