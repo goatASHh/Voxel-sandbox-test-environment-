@@ -459,6 +459,7 @@ jobs:
 
       - name: Install and launch ARM64 APK in ARM64 Android emulator
         shell: bash
+        timeout-minutes: 15
         env:
           APK_PATH: ${{ steps.apk.outputs.path }}
           PACKAGE_ID: ${{ github.ref_name == 'experiment/tree-generation' && 'com.pocovoxelsandbox.game.v2' || 'com.pocovoxelsandbox.game' }}
@@ -491,10 +492,17 @@ jobs:
           }
           trap cleanup EXIT
 
-          echo "Waiting for Android 16 emulator device..."
-          adb wait-for-device
+          echo "Waiting for Android 16 emulator device (90-second ADB connection limit)..."
+          if ! timeout --signal=TERM --kill-after=10s 90s adb wait-for-device; then
+            echo "::error::ADB did not detect the emulator within 90 seconds."
+            echo "--- Emulator startup log ---"
+            cat "$RUNNER_TEMP/emulator.log" || true
+            echo "--- ADB device list ---"
+            timeout 15s adb devices -l || true
+            exit 1
+          fi
           for attempt in $(seq 1 120); do
-            BOOTED="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\\r' || true)"
+            BOOTED="$(timeout 20s adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\\r' || true)"
             if [ "$BOOTED" = "1" ]; then
               break
             fi
@@ -505,8 +513,12 @@ jobs:
             fi
             if [ "$attempt" -eq 120 ]; then
               echo "::error::Android 16 ARM64 emulator did not finish booting within 10 minutes."
-              cat "$RUNNER_TEMP/emulator.log"
-              adb logcat -d -t 1000 || true
+              echo "--- Emulator startup log ---"
+              cat "$RUNNER_TEMP/emulator.log" || true
+              echo "--- ADB devices ---"
+              timeout 15s adb devices -l || true
+              echo "--- Recent Android logcat ---"
+              timeout 20s adb logcat -d -t 1000 || true
               exit 1
             fi
             sleep 5
@@ -528,13 +540,13 @@ jobs:
           fi
 
           echo "Installing exact ARM64 APK through Android's ARM64 native bridge: $APK_PATH"
-          adb install -r "$APK_PATH"
+          timeout --signal=TERM --kill-after=15s 120s adb install -r "$APK_PATH"
           echo "Launching package: $PACKAGE_ID"
-          adb shell monkey -p "$PACKAGE_ID" 1
+          timeout 30s adb shell monkey -p "$PACKAGE_ID" 1
           sleep 10
-          if ! adb shell pidof "$PACKAGE_ID" | tr -d '\\r' | grep -q '[0-9]'; then
+          if ! timeout 20s adb shell pidof "$PACKAGE_ID" | tr -d '\\r' | grep -q '[0-9]'; then
             echo "::error::APK installed, but its process did not remain running after launch."
-            adb logcat -d -t 1500
+            timeout 20s adb logcat -d -t 1500
             exit 1
           fi
           adb shell dumpsys activity activities | grep -F "$PACKAGE_ID" || true
