@@ -469,6 +469,28 @@ jobs:
           print("\\n".join(matches))
           if not any("0xffffffff" in line.lower() or "true" in line.lower() for line in matches):
               raise SystemExit("ERROR: android:extractNativeLibs is not explicitly true")
+
+          # Android 12+ rejects any activity with an intent filter unless
+          # android:exported is explicitly declared. Require it on the launcher.
+          text = Path(os.environ["RUNNER_TEMP"], "manifest-tree.txt").read_text()
+          blocks = text.split("E: activity ")
+          launcher_ok = False
+          for block in blocks[1:]:
+              activity_name = "com.pocovoxelsandbox.game.MainActivity"
+              if activity_name not in block:
+                  continue
+              activity_block = block.split("E:", 1)[0]
+              if "android:exported" in activity_block and (
+                  "0xffffffff" in activity_block.lower() or "true" in activity_block.lower()
+              ):
+                  launcher_ok = True
+                  break
+          if not launcher_ok:
+              raise SystemExit(
+                  "ERROR: MainActivity must explicitly declare android:exported=true. "
+                  "Refusing to upload an APK that Android 12+ will reject."
+              )
+          print("PASS: MainActivity explicitly declares android:exported=true")
           PY
 
           echo "--- APK entry/compression audit ---"
