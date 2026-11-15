@@ -457,6 +457,75 @@ jobs:
           echo "Verified package=$EXPECTED_PACKAGE ABI=arm64-v8a"
           sha256sum "$APK"
 
+          echo "--- Decoded Android manifest ---"
+          "$BUILD_TOOLS/aapt" dump xmltree "$APK" AndroidManifest.xml | tee "$RUNNER_TEMP/manifest-tree.txt"
+          python3 - <<'PY'
+          from pathlib import Path
+          lines = Path("$RUNNER_TEMP/manifest-tree.txt").read_text().splitlines()
+          matches = [line.strip() for line in lines if "extractNativeLibs" in line]
+          if not matches:
+              raise SystemExit("ERROR: manifest does not explicitly declare android:extractNativeLibs")
+          print("\\n".join(matches))
+          if not any("0xffffffff" in line.lower() or "true" in line.lower() for line in matches):
+              raise SystemExit("ERROR: android:extractNativeLibs is not explicitly true")
+          PY
+
+          echo "--- APK entry/compression audit ---"
+          python3 - "$APK" <<'PY'
+          import sys, zipfile
+          path = sys.argv[1]
+          with zipfile.ZipFile(path) as z:
+              bad = z.testzip()
+              if bad:
+                  raise SystemExit(f"Corrupt ZIP entry: {bad}")
+              names = set(z.namelist())
+              required = ["AndroidManifest.xml", "classes.dex", "resources.arsc"]
+              for item in required:
+                  if item not in names:
+                      raise SystemExit(f"Missing required APK entry: {item}")
+              libs = [i for i in z.infolist() if i.filename.startswith("lib/") and i.filename.endswith(".so")]
+              if not libs:
+                  raise SystemExit("No native .so library found")
+              for item in z.infolist():
+                  print(f"{item.filename}: method={'stored' if item.compress_type == 0 else 'deflated' if item.compress_type == 8 else item.compress_type}, compressed={item.compress_size}, uncompressed={item.file_size}")
+              for lib in libs:
+                  if lib.compress_type == 0:
+                      raise SystemExit(f"{lib.filename} is stored, but this workflow expects compressed libraries plus extractNativeLibs=true")
+              print(f"ZIP integrity passed; {len(libs)} compressed native library/libraries found.")
+          PY
+
+          echo "--- Native ELF program-header alignment ---"
+          python3 - "$APK" "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" "$RUNNER_TEMP" <<'PY'
+          import pathlib, subprocess, sys, zipfile
+          apk, readelf, tmp = sys.argv[1:]
+          with zipfile.ZipFile(apk) as z:
+              libs = [n for n in z.namelist() if n.startswith("lib/arm64-v8a/") and n.endswith(".so")]
+              if len(libs) != 1:
+                  raise SystemExit(f"Expected exactly one ARM64 shared library, found {len(libs)}")
+              libpath = pathlib.Path(tmp) / "native-check.so"
+              libpath.write_bytes(z.read(libs[0]))
+          out = subprocess.check_output([readelf, "-lW", str(libpath)], text=True)
+          print(out)
+          loads = [line.split()[-1] for line in out.splitlines() if line.lstrip().startswith("LOAD ")]
+          if not loads:
+              raise SystemExit("No ELF LOAD segments found")
+          alignments = [int(value, 0) for value in loads]
+          if any(value < 0x4000 or value % 0x4000 for value in alignments):
+              raise SystemExit(f"ELF LOAD segments are not all 16-KiB aligned: {alignments}")
+          print(f"PASS: ELF LOAD segment alignments: {[hex(x) for x in alignments]}")
+          PY
+
+          echo "--- APK ZIP alignment (16-KiB native page option) ---"
+          "$BUILD_TOOLS/zipalign" -c -P 16 -v 4 "$APK"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.ref_name == 'experiment/tree-generation' && 'poco-voxel-sandbox-v2-tree-fix-arm64-apk' || 'poco-voxel-sandbox-arm64-apk' }}
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Install and launch ARM64 APK in ARM64 Android emulator
         shell: bash
         timeout-minutes: 15
@@ -551,14 +620,6 @@ jobs:
           fi
           adb shell dumpsys activity activities | grep -F "$PACKAGE_ID" || true
           echo "PASS: ARM64 APK installed and remained running on Android 16 (API 36) using the emulator ARM64 native bridge."
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.ref_name == 'experiment/tree-generation' && 'poco-voxel-sandbox-v2-tree-fix-arm64-apk' || 'poco-voxel-sandbox-arm64-apk' }}
-          path: ${{ steps.apk.outputs.path }}
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Commit prepared source to repository root
         shell: bash
         run: |
