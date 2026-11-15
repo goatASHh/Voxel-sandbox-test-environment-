@@ -1,5 +1,5 @@
 [package]
-name = "poco_voxel_sandbox"
+name = "game"
 version = "0.2.0"
 edition = "2021"
 description = "Original Android-first creative voxel sandbox prototype"
