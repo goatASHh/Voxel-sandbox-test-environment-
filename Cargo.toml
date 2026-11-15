@@ -34,3 +34,6 @@ target_sdk_version = 35
 # Explicit extraction avoids relying on Android's manifest defaults.
 [package.metadata.android.application_attributes]
 "android:extractNativeLibs" = "true"
+
+[package.metadata.android.activity_attributes]
+"android:exported" = "true"
