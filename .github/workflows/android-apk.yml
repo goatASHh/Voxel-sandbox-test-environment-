@@ -17,7 +17,7 @@ permissions:
 
 concurrency:
   group: poco-android-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   rust-tests:
@@ -185,7 +185,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3 4; do
-            if sdkmanager --install "platform-tools" "platforms;android-29" "platforms;android-30" "platforms;android-35" "platforms;android-36" "emulator" "system-images;android-36;google_apis;arm64-v8a" "build-tools;35.0.0" "ndk;27.2.12479018"; then
+            if sdkmanager --install "platform-tools" "platforms;android-29" "platforms;android-30" "platforms;android-35" "platforms;android-36" "emulator" "system-images;android-36;google_apis;x86_64" "build-tools;35.0.0" "ndk;27.2.12479018"; then
               exit 0
             fi
             if [ "$attempt" -eq 4 ]; then
@@ -474,16 +474,16 @@ jobs:
           export PATH="$JAVA_HOME/bin:$PATH"
           java -version
 
-          IMAGE="system-images;android-36;google_apis;arm64-v8a"
-          AVD_NAME="poco-android16-arm64-test"
+          IMAGE="system-images;android-36;google_apis;x86_64"
+          AVD_NAME="poco-android16-arm-translation-test"
 
-          echo "Creating ARM64 Android 16 (API 36) emulator..."
+          echo "Creating Android 16 (API 36) x86_64 emulator with Google ARM64 native-code translation..."
           echo "no" | avdmanager create avd --force --name "$AVD_NAME" --package "$IMAGE" --device "pixel_2"
 
           adb start-server
           emulator -avd "$AVD_NAME" \
             -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim \
-            -accel off -no-metrics > "$RUNNER_TEMP/emulator.log" 2>&1 &
+            -accel auto -no-metrics > "$RUNNER_TEMP/emulator.log" 2>&1 &
           EMULATOR_PID=$!
           cleanup() {
             adb -s emulator-5554 emu kill >/dev/null 2>&1 || true
@@ -516,7 +516,18 @@ jobs:
           adb shell settings put global transition_animation_scale 0
           adb shell settings put global animator_duration_scale 0
 
-          echo "Installing exact ARM64 APK: $APK_PATH"
+          echo "Checking Android 16 emulator ARM64 translation support..."
+          ABILIST="$(adb shell getprop ro.product.cpu.abilist | tr -d '\r')"
+          NATIVE_BRIDGE="$(adb shell getprop ro.dalvik.vm.native.bridge | tr -d '\r')"
+          echo "Emulator ABIs: $ABILIST"
+          echo "Native bridge: $NATIVE_BRIDGE"
+          if [[ ",$ABILIST," != *",arm64-v8a,"* || -z "$NATIVE_BRIDGE" ]]; then
+            echo "::error::Android 16 emulator does not advertise ARM64 ABI translation."
+            adb shell getprop | grep -E 'abilist|native.bridge' || true
+            exit 1
+          fi
+
+          echo "Installing exact ARM64 APK through Android's ARM64 native bridge: $APK_PATH"
           adb install -r "$APK_PATH"
           echo "Launching package: $PACKAGE_ID"
           adb shell monkey -p "$PACKAGE_ID" 1
@@ -527,7 +538,7 @@ jobs:
             exit 1
           fi
           adb shell dumpsys activity activities | grep -F "$PACKAGE_ID" || true
-          echo "PASS: ARM64 APK installed and remained running on Android 16 (API 36)."
+          echo "PASS: ARM64 APK installed and remained running on Android 16 (API 36) using the emulator ARM64 native bridge."
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
