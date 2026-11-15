@@ -29,3 +29,8 @@ assets = "assets"
 build_targets = ["aarch64-linux-android"]
 min_sdk_version = 26
 target_sdk_version = 35
+
+# The legacy packager stores .so files compressed in the APK.
+# Explicit extraction avoids relying on Android's manifest defaults.
+[package.metadata.android.application_attributes]
+"android:extractNativeLibs" = "true"
