@@ -111,6 +111,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "game"
+version = "0.2.0"
+dependencies = [
+ "macroquad",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "glam"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -260,15 +269,6 @@ dependencies = [
  "fdeflate",
  "flate2",
  "miniz_oxide 0.8.9",
-]
-
-[[package]]
-name = "poco_voxel_sandbox"
-version = "0.2.0"
-dependencies = [
- "macroquad",
- "serde",
- "serde_json",
 ]
 
 [[package]]
