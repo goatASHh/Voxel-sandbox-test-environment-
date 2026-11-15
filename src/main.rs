@@ -138,7 +138,7 @@ async fn main() {
     let mut distance = 52.0_f32;
     let mut save_status = String::from("WORLD: UNSAVED");
     let mut fly_mode = false;
-    let mut fly_position = vec3(0.0, 58.0, 0.0);
+    let mut fly_position = player_position + vec3(0.0, 1.62, 0.0);
     let mut fly_speed = 18.0_f32;
     let mut last_pointer = vec2(0.0, 0.0);
     let mut dragging = false;
@@ -232,6 +232,7 @@ async fn main() {
                     show_performance = !show_performance;
                 } else if fly_rect.contains(p) {
                     fly_mode = !fly_mode;
+                    if fly_mode { fly_position = player_position + vec3(0.0, 1.62, 0.0); }
                 } else if !fly_mode && jump_rect.contains(p) {
                     jump_requested = true;
                 } else if fly_mode && rise_rect.contains(p) {
@@ -256,8 +257,8 @@ async fn main() {
                 if touch.phase == TouchPhase::Moved || touch.phase == TouchPhase::Stationary {
                     let delta = p - look_last;
                     if touch.phase == TouchPhase::Moved {
-                        yaw -= delta.x * 0.006;
-                        pitch = (pitch - delta.y * 0.005).clamp(-1.35, 1.35);
+                        yaw += delta.x * 0.006;
+                        pitch = (pitch - delta.y * 0.005).clamp(-1.553, 1.553);
                     }
                     look_last = p;
                 }
@@ -283,15 +284,15 @@ async fn main() {
             let (mx, my) = mouse_position();
             let now = vec2(mx, my);
             let delta = now - last_pointer;
-            yaw -= delta.x * 0.006;
-            pitch = (pitch - delta.y * 0.005).clamp(-1.35, 1.35);
+            yaw += delta.x * 0.006;
+            pitch = (pitch - delta.y * 0.005).clamp(-1.553, 1.553);
             last_pointer = now;
         }
         let (_, wheel_y) = mouse_wheel();
         distance = (distance - wheel_y * 2.5).clamp(12.0, 115.0);
         if is_key_pressed(KeyCode::H) { show_help = !show_help; }
         if is_key_pressed(KeyCode::F3) { show_performance = !show_performance; }
-        if is_key_pressed(KeyCode::F) { fly_mode = !fly_mode; player_velocity = Vec3::ZERO; }
+        if is_key_pressed(KeyCode::F) { fly_mode = !fly_mode; player_velocity = Vec3::ZERO; if fly_mode { fly_position = player_position + vec3(0.0, 1.62, 0.0); } }
         if is_key_pressed(KeyCode::F5) || save_requested {
             let data: Vec<Chunk> = chunks.iter().map(|c| c.data.clone()).collect();
             save_status = match save::save_world("poco_world.json", WORLD_SEED, &data) {
